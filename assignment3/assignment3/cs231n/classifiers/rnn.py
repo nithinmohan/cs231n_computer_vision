@@ -140,15 +140,20 @@ class CaptioningRNN(object):
         h0 = features.dot(W_proj)+b_proj
         
         wemb_out, wemb_cache = word_embedding_forward(captions_in, W_embed)
-        
-        rnn_out, rnn_cache=rnn_forward(wemb_out, h0, Wx, Wh, b)
-        
+        if self.cell_type == 'rnn':
+            rnn_out, rnn_cache=rnn_forward(wemb_out, h0, Wx, Wh, b)
+        elif self.cell_type == 'lstm':
+            rnn_out, rnn_cache=lstm_forward(wemb_out, h0, Wx, Wh, b)
+            
         affine_out,affine_cache=temporal_affine_forward(rnn_out, W_vocab, b_vocab)
         
         loss, dout = temporal_softmax_loss(affine_out, captions_out, mask, verbose=False)
         
         dout,dW_vocab,db_vocab=temporal_affine_backward(dout,affine_cache)
-        dout,dh0,dWx,dWh,db=rnn_backward(dout,rnn_cache)
+        if self.cell_type == 'rnn':
+            dout,dh0,dWx,dWh,db=rnn_backward(dout,rnn_cache)
+        elif self.cell_type == 'lstm':
+            dout,dh0,dWx,dWh,db=lstm_backward(dout,rnn_cache)
         dW_embed=word_embedding_backward(dout,wemb_cache)
         dW_proj = features.T.dot(dh0)
         db_proj = np.sum(dh0,axis=0)
@@ -217,15 +222,19 @@ class CaptioningRNN(object):
         # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
         # a loop.                                                                 #
         ###########################################################################
-        current_word = self._start
+        captions[:,0] = self._start
         h0 = features.dot(W_proj)+b_proj
+        prev_c = np.zeros_like(h0)
         last_hidden_state = h0
         for i in range(max_length):
-            embeded,_ = word_embedding_forward(current_word, W_embed)
-            last_hidden_state,_ = rnn_step_forward(embeded, last_hidden_state, Wx, Wh, b)
-            if len(last_hidden_state.shape)==2:
-                last_hidden_state=last_hidden_state.reshape(last_hidden_state.shape[0],1,last_hidden_state.shape[1])
-            result,_ = temporal_affine_forward(last_hidden_state, W_vocab, b_vocab)
+            embeded,_ = word_embedding_forward(captions[:,i], W_embed)
+            if self.cell_type == 'rnn':
+                last_hidden_state,_ = rnn_step_forward(embeded, last_hidden_state, Wx, Wh, b)
+            elif self.cell_type == 'lstm':
+                last_hidden_state,prev_c,_ = lstm_step_forward(embeded, last_hidden_state, prev_c,Wx, Wh, b)
+            
+            
+            result,_ = temporal_affine_forward(last_hidden_state.reshape(last_hidden_state.shape[0],1,last_hidden_state.shape[1]), W_vocab, b_vocab)
             
             idx_best = np.squeeze(np.argmax(result, axis=2))
             # Put it in the captions
